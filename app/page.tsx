@@ -227,7 +227,7 @@ export default function Home() {
     setBusy(true);
 
     const result = authMode === "sign up"
-      ? await db.auth.signUp({ email, password })
+      ? await db.auth.signUp({ email, password, options: { emailRedirectTo: window.location.origin + window.location.pathname } })
       : await db.auth.signInWithPassword({ email, password });
 
     setBusy(false);
@@ -426,11 +426,12 @@ export default function Home() {
     try {
       const { data: { session } } = await db.auth.getSession();
 
-      const response = await fetch("/api/adviser", {
+      const response = await fetch(`${URL.replace(/\/$/, "")}/functions/v1/adviser`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token || ""}`,
+          apikey: KEY,
         },
         body: JSON.stringify({
           goal: which,
@@ -443,7 +444,7 @@ export default function Home() {
         }),
       });
 
-      const data = await response.json() as Advice & { error?: string };
+      const data = await response.json().catch(() => ({ error: "Adviser function unavailable. Deploy the Supabase adviser function and check its configuration." })) as Advice & { error?: string };
 
       if (!response.ok) {
         setError(data.error || "AI request failed");
@@ -463,7 +464,7 @@ export default function Home() {
         await saveAdvice(data);
       }
     } catch {
-      setError("Could not contact BizWise. Try again.");
+      setError("Could not contact the adviser. Check your connection and the deployed Supabase function?s ALLOWED_ORIGINS setting.");
     } finally {
       setBusy(false);
     }
@@ -609,8 +610,10 @@ export default function Home() {
     return (
       <main className="shell">
         <div className="notice error">
-          Supabase URL and publishable key are missing. Set the public
-          environment variables and restart the app.
+          Supabase URL and publishable key are missing. Set NEXT_PUBLIC_SUPABASE_URL
+          and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in GitHub Actions repository variables,
+          then run the Deploy GitHub Pages workflow again. For local development,
+          set them in .env.local and restart.
         </div>
       </main>
     );

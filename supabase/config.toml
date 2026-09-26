@@ -1,0 +1,7 @@
+project_id = "bizwise"
+
+[functions.adviser]
+# Authentication is performed by auth.getUser(token) inside the handler.
+# This also supports projects using asymmetric JWT signing keys.
+verify_jwt = false
+entrypoint = "./functions/adviser/index.ts"

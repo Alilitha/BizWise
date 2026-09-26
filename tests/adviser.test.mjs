@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 const dataUrl = source => 'data:text/javascript;base64,' + Buffer.from(ts.transpile(source, { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 })).toString('base64');
-const sharedUrl = dataUrl(await readFile(new URL('../app/adviser/shared.ts', import.meta.url), 'utf8'));
-const server = await import(dataUrl((await readFile(new URL('../app/adviser/server.ts', import.meta.url), 'utf8')).replace("'./shared'", JSON.stringify(sharedUrl))));
+const sharedUrl = dataUrl(await readFile(new URL('../supabase/functions/adviser/shared.ts', import.meta.url), 'utf8'));
+globalThis.Deno = { env: { get: name => process.env[name] } };
+const server = await import(dataUrl((await readFile(new URL('../supabase/functions/adviser/providers.ts', import.meta.url), 'utf8')).replace("'./shared.ts'", JSON.stringify(sharedUrl))));
 const shared = await import(sharedUrl);
 test('image validation rejects URLs, SVG, spoofed and oversized content', () => {
   assert.equal(server.validateImage(undefined), undefined);

@@ -1,10 +1,8 @@
-import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-import { AdviserError, readBody, validateImage, searchWeb, extractImage } from "../../adviser/server";
+import { AdviserError, readBody, validateImage, searchWeb, extractImage } from "./providers.ts";
 
-export const runtime = "nodejs";
-export const maxDuration = 90;
+
 
 const num = (value: unknown) => Number(value || 0);
 const total = (values: number[]) => values.reduce((a, b) => a + b, 0);
@@ -31,19 +29,19 @@ type Service = { id: string; name: string };
 type Feedback = { rating: number | null; comment: string | null };
 type Action = { enquiries: number; bookings: number };
 
-export async function POST(req: Request) {
+async function advise(req: Request) {
   try {
-    const token = req.headers.get("authorization")?.replace(/^Bearer /, "");
+    const token = req.headers.get("authorization")?.match(/^Bearer\s+(\S+)$/i)?.[1];
     if (!token) {
-      return NextResponse.json({ error: "Sign in first" }, { status: 401 });
+      return Response.json({ error: "Sign in first" }, { status: 401 });
     }
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    const groqKey = process.env.GROQ_API_KEY;
+    const url = Deno.env.get("SUPABASE_URL");
+    const publishableKey = Deno.env.get("BIZWISE_SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
+    const groqKey = Deno.env.get("GROQ_API_KEY");
 
     if (!url || !publishableKey) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Supabase configuration missing" },
         { status: 503 }
       );
@@ -56,14 +54,14 @@ export async function POST(req: Request) {
       await authClient.auth.getUser(token);
 
     if (authError || !user) {
-      return NextResponse.json({ error: "Session expired" }, { status: 401 });
+      return Response.json({ error: "Session expired" }, { status: 401 });
     }
 
     const body = await readBody(req);
     const goal = body.goal;
 
     if (goal !== "ask" && goal !== "advert") {
-      return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+      return Response.json({ error: "Invalid request" }, { status: 400 });
     }
 
     const question =
@@ -72,7 +70,7 @@ export async function POST(req: Request) {
         : "";
 
     if (goal === "ask" && question.length < 8) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Describe what you want help with in a few words." },
         { status: 400 }
       );
@@ -95,7 +93,7 @@ export async function POST(req: Request) {
       .single();
 
     if (shopResult.error || !shopResult.data) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Set up your shop first" },
         { status: 400 }
       );
@@ -129,7 +127,7 @@ export async function POST(req: Request) {
       feedbackResult.error ||
       actionsResult.error
     ) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Could not read shop records" },
         { status: 500 }
       );
@@ -252,8 +250,8 @@ export async function POST(req: Request) {
     };
 
     if (!groqKey) {
-      return NextResponse.json(
-        { error: "Add GROQ_API_KEY to .env.local and restart the server." },
+      return Response.json(
+        { error: "Set GROQ_API_KEY in Supabase Edge Function secrets." },
         { status: 503 }
       );
     }
@@ -270,7 +268,7 @@ export async function POST(req: Request) {
       goal === "advert" &&
       (!service || !offer || !services.some(item => item.name === service))
     ) {
-      return NextResponse.json(
+      return Response.json(
         { error: "Choose a saved service and confirm the offer first." },
         { status: 400 }
       );
@@ -354,7 +352,7 @@ manually entering records. Never claim you saved or changed jobs or payments.`;
             ? "Groq's free limit was reached. Wait and try again."
             : "Groq could not generate advice right now. Try again shortly.";
 
-      return NextResponse.json(
+      return Response.json(
         { error },
         { status: response.status === 429 ? 429 : 502 }
       );
@@ -366,23 +364,49 @@ manually entering records. Never claim you saved or changed jobs or payments.`;
     const answer = result.choices?.[0]?.message?.content?.trim();
 
     if (!answer || result.choices?.[0]?.finish_reason === "length") {
-      return NextResponse.json(
+      return Response.json(
         { error: "Groq returned empty or incomplete advice. Try a narrower question." },
         { status: 502 }
       );
     }
 
-    return NextResponse.json({
+    return Response.json({
       answer,
       extraction,
       evidence: { ...evidence, owner_question: question, web_sources: webSources, web_searched: research, image_observations: extraction, image_confirmed: false },
       goal: category,
     });
   } catch (error) {
-    if (error instanceof AdviserError) return NextResponse.json({ error: error.message }, { status: error.status });
-    return NextResponse.json(
+    if (error instanceof AdviserError) return Response.json({ error: error.message }, { status: error.status });
+    return Response.json(
       { error: "Could not prepare advice. Try again." },
       { status: 500 }
     );
   }
+}
+// CORS is a browser boundary; getUser above is the authentication boundary.
+// Every request has its own Supabase clients and owner-scoped queries.
+export async function handleRequest(req: Request): Promise<Response> {
+  const allowedOrigins = (Deno.env.get("ALLOWED_ORIGINS") || "")
+    .split(",").map(value => value.trim()).filter(Boolean);
+  const origin = req.headers.get("origin");
+  const headers = new Headers({
+    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Max-Age": "86400",
+    "Cache-Control": "no-store",
+    "Vary": "Origin",
+  });
+  if (origin && !allowedOrigins.includes(origin)) {
+    return Response.json({ error: "Origin not allowed. Configure ALLOWED_ORIGINS in Supabase Edge Function secrets." }, { status: 403, headers });
+  }
+  if (origin) headers.set("Access-Control-Allow-Origin", origin);
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers });
+  if (req.method !== "POST") {
+    headers.set("Allow", "POST, OPTIONS");
+    return Response.json({ error: "Method not allowed" }, { status: 405, headers });
+  }
+  const response = await advise(req);
+  headers.forEach((value, key) => response.headers.set(key, value));
+  return response;
 }

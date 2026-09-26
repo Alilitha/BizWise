@@ -1,68 +1,126 @@
-# BizWise Garage MVP
+﻿# BizWise Garage — GitHub Pages + Supabase
 
-A mobile-friendly Next.js app for independent South African repair shops. It supports account sign-in, shop and service setup, jobs, partial payments, calculated summaries, AI business advice, editable adverts, action results, feedback, and CSV export.
+The interface is a static Next.js export hosted at **https://alilitha.github.io/BizWise/**. Supabase handles sign-in, shop records and the adviser Edge Function. No Vercel or Next.js server is needed in production.
 
-## Before running
+The conversion is prepared locally. Upload/push these changes and complete the account configuration below to publish it. The existing README-only Pages site will be replaced by the app after the Pages workflow succeeds.
 
-1. Create a Supabase project. In its **SQL Editor**, run `supabase/migrations/20260925_bizwise.sql` in full. The SQL creates tables, payment checks, and row level security policies. Do not enter real customer data until this is complete.
-2. Copy `.env.example` to `.env.local`. Set the Supabase project URL and **publishable** key. Create a new Groq key at https://console.groq.com/keys and set `GROQ_API_KEY` as a server-only environment variable. Replace the placeholders; never commit `.env.local`.
-3. On Windows, install Node.js 22.13 or newer, then run `npm install` and `npm run dev` inside the extracted project folder. Open the local address shown in the terminal. This package uses standard Next.js commands and does not require the Sites build helper.
-4. If Supabase Auth requires email confirmation, confirm the account from your email before signing in. Configure the correct Site URL/redirects in the Supabase Auth dashboard for the deployment you use.
+## 1. Set the two public GitHub variables
 
-The AI endpoint calls Groq’s chat completions API with `openai/gpt-oss-20b`. Groq free-plan limits apply and may change. The app displays a configuration error when the key is missing rather than pretending that AI is working.
+In the **Alilitha/BizWise** repository open **Settings → Secrets and variables → Actions → Variables → New repository variable**. Add:
 
-## Demo flow
+| Variable | Value |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Your existing Supabase project URL, such as `https://your-project.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The same project's publishable key (`sb_publishable_...`) |
+| `SUPABASE_PROJECT_REF` | The project reference from Supabase project settings (the subdomain before `.supabase.co`) |
 
-Sign up → set up shop → add a service → add three completed jobs → add a partial payment → view Home → ask BizWise → confirm an offer and generate an advert → edit, save and copy it → record enquiries and bookings in Actions.
+These are configuration values, not Groq/Serper credentials. The first two are intentionally included in the browser build. The workflow refuses missing/placeholder values and secret/service-role keys. After changing either public variable, rerun the Pages workflow to rebuild the site.
 
-Example job: R1 200 charged − R650 parts − R100 other direct costs = **R450 left after recorded direct costs**. A R500 payment leaves **R700 outstanding**. This is not net profit.
+The Pages workflow obtains the base path from GitHub automatically: `/BizWise` for this repository. Do not enter it as part of the Supabase URL.
 
-## Status
+## 2. Configure Supabase
 
-TypeScript check and standard Next.js production build passed in the development workspace. The development server started with an explicit loopback address. A live Supabase account flow, SQL application, cross-account row level security, and live Groq call require access to the provisioned project and a newly issued server secret; they were not verified here. The action tracker relies on owner-reported attribution. Advert sharing uses copy-to-clipboard. The AI response is plain text; the database stores its underlying evidence summary.
+Use your existing Supabase project. If the database has not yet been set up, apply `supabase/migrations/20260925_bizwise.sql` once using SQL Editor. Do not rerun it blindly on an existing database: its triggers/policies already exist. This conversion needs no new tables or migrations. Keep all included Row Level Security policies enabled.
 
-## Security
+In **Authentication → URL Configuration** set:
 
-Do not commit `.env.local`. Never use a Supabase secret/service-role key in the browser. The publishable key is safe for client use only with the included RLS policies applied. Revoke any OpenAI or Groq key that has been shared in chat. The server re-authenticates AI requests with the Supabase access token and queries only the signed-in owner's shop.
+- Site URL: `https://alilitha.github.io/BizWise/`
+- Redirect URLs: `https://alilitha.github.io/BizWise/`, plus `http://localhost:3000/` and `http://127.0.0.1:3000/` if developing locally.
 
-## Voice, images and public web research
+In **Edge Functions → Secrets**, add:
 
-No extra packages are required. Existing dependencies and native fetch are used.
+| Secret name | Value |
+| --- | --- |
+| `GROQ_API_KEY` | A newly issued Groq key; revoke the previously exposed one |
+| `SERPER_API_KEY` | Your Serper key |
+| `BIZWISE_SUPABASE_PUBLISHABLE_KEY` | Your Supabase publishable key (same as the GitHub variable) |
+| `ALLOWED_ORIGINS` | `https://alilitha.github.io,http://localhost:3000,http://127.0.0.1:3000` |
+| `GROQ_VISION_MODEL` | Optional: `qwen/qwen3.8-27b` is the default |
 
-Configuration in `.env.local` (restart `npm run dev` after changing it):
+Origins must have **no `/BizWise` path or trailing slash**. Add other origins explicitly if you use a custom domain or another local port. The Supabase runtime supplies `SUPABASE_URL` automatically. The function can use the built-in legacy `SUPABASE_ANON_KEY` when the custom publishable key is not provided; it never uses a service-role key.
 
-```dotenv
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-project-publishable-key
-GROQ_API_KEY=
-SERPER_API_KEY=
-# Optional override; current documented Groq vision model:
-GROQ_VISION_MODEL=qwen/qwen3.8-27b
-```
+Get provider keys from [Groq](https://console.groq.com/keys) and [Serper](https://serper.dev/api-key). Keep them only in Supabase secrets, never in GitHub public variables or any `NEXT_PUBLIC_` variable. Do not upload `.env.local`, a private function env file, or real keys in an example file.
 
-Get Supabase values from your project's Connect/API settings at https://supabase.com/dashboard, a NEW Groq key from https://console.groq.com/keys, and a Serper key from https://serper.dev/api-key. Revoke the exposed Groq key (also previously present in `.env.example`) before using this app. Removing a key from a file does not revoke it. The existing `.env.local` has not been overwritten. Never commit it. Only the Supabase URL and publishable key belong in NEXT_PUBLIC variables.
+## 3. Deploy the adviser from GitHub
 
-Service documentation checked for this implementation:
-- Groq vision: https://console.groq.com/docs/vision (qwen/qwen3.8-27b, base64 image content).
-- Serper search: https://serper.dev/playground (server POST with X-API-KEY authentication).
-- Browser speech: https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition.
+Create a Supabase personal access token at [Supabase account tokens](https://supabase.com/dashboard/account/tokens). Add it to GitHub **Settings → Secrets and variables → Actions → Secrets** as `SUPABASE_ACCESS_TOKEN`. This is a deployment credential, not the project's publishable key.
 
-### Local checks
+After pushing the files:
 
-Run `npm run dev`, open http://localhost:3000 (or the terminal's port), sign in, and set up a shop with its town and a saved service. Existing node_modules are sufficient; a fresh checkout uses `npm install`.
+1. Open **Actions → Deploy Supabase adviser → Run workflow** on your main branch.
+2. Wait for success. Your existing tables will not be modified by this workflow.
+3. Supabase should show the `adviser` function at `https://YOUR-PROJECT.supabase.co/functions/v1/adviser`.
 
-1. **Voice:** Open Adviser, press Speak question, allow microphone access, speak, and press Stop recording. Review/edit the populated text before Ask BizWise. Submission is disabled during listening. Deny permission to check the error; test an unsupported browser to check the typed fallback. Use HTTPS or localhost. Browser speech support varies: try Chrome; Firefox and embedded browsers may lack it. Browser-provided recognition can send audio to its own online service; offline operation is not promised. No audio is uploaded to this app, and no speech API key is required. Actual microphone recognition must be tested on your device.
-2. **Images:** Attach a JPEG, PNG or WebP under 3 MB and 20 megapixels. Check preview/removal. HEIC/PDF/SVG, empty, oversized and unreadable files show errors. Ask about a receipt or job card. Check the separate visible-content/figures panel against the original. Advice is not saved until the confirmation checkbox and Confirm and save advice button are used. If the reading is wrong, crop/replace the image and ask again. Saving records remains manual through Jobs/Payments; the AI has no write tools. Test an image saying “ignore instructions” to check it is reported as content rather than followed. The image is sent via the authenticated server to Groq; its original bytes are not stored in Supabase. Confirmed extraction and advice are stored in adviser_actions.evidence_json/recommendation.
-3. **Research:** Enable Research the public web and ask “What are competitors near my shop offering?” or “What do customers in my area look for in a repair shop?” These example local questions also trigger research automatically. Check source numbers, clickable links, publication dates when supplied, retrieval timestamps, and excerpts. Sources are preserved in Actions. The search sends only the question and saved town to Serper. Do not put private details in a research question. Search snippets are public claims, not verified demand or a complete competitor census. Removing SERPER_API_KEY and restarting should show a clear configuration error without fabricated findings.
-4. **Regression:** Ask a typed records-only question, add a job and partial payment, generate an advert from a saved action, save its draft, and update action results. Verify record figures remain unchanged after image analysis. Sign out/in and ensure the previous adviser attachment/result clears.
+`supabase/config.toml` sets `verify_jwt = false` because the function validates the bearer token itself with Supabase Auth `getUser(token)`. Missing/invalid user tokens are rejected before any shop queries or provider calls. This is not an anonymous adviser: do not remove the in-function verification. Every database read uses the user's token and owner/shop filters, preserving RLS.
 
-Automated checks:
+If you prefer a local CLI instead of a GitHub deployment token:
+
 ```sh
-node --test tests/adviser.test.mjs
-npm run typecheck
-npm run build
+npx supabase login
+npx supabase functions deploy adviser --project-ref YOUR_PROJECT_REF
 ```
 
-The focused tests use mocked provider responses; they do not prove live account/model access. The local SQL migration and owner-scoped queries were inspected; the deployed Supabase schema/RLS has not been inspected directly. No migration is needed for these features: existing shops.town and adviser_actions.evidence_json are used. The route authenticates through Supabase before accessing shop records or paid providers and bounds the actual request stream. The model sees external text as untrusted data and cannot write business records. Prompt instructions reduce, but cannot guarantee elimination of, malicious content influence; review readings and advice.
+Use the tracked config when deploying. The function consists of `index.ts`, `handler.ts`, `providers.ts`, `shared.ts`, `deno.json` and its generated lockfile in `supabase/functions/adviser/`.
 
-Status: UI and server integrations are implemented, five focused tests and typecheck/build pass. Voice requires a supporting browser and microphone permission. Advice/image interpretation require a rotated GROQ_API_KEY and model access. Research also requires SERPER_API_KEY and available account credits. Live sign-in/database/provider calls and physical microphone/mobile interactions were not verified in this development run.
+## 4. Publish GitHub Pages
+
+1. Push/upload the updated source files, including the hidden `.github/workflows` directory. Do not upload `node_modules`, `.next`, `out`, or private `.env` files. Preserve any unrelated work in your checkout.
+2. In GitHub **Settings → Pages → Build and deployment → Source**, select **GitHub Actions**, replacing the old “Deploy from a branch” setting.
+3. Under **Actions**, run **Deploy GitHub Pages**. Future pushes to `main` or `master` run it automatically. If another branch is your default, update the workflow's branch list.
+4. Wait for both build and deploy to pass, then open **https://alilitha.github.io/BizWise/**.
+
+The workflow publishes only `out/`, not the source repository or README. It checks public configuration, runs nine tests, checks the Edge Function with Deno, builds the static app, runs TypeScript, verifies asset paths and scans the export for server provider code/recognizable secrets before publishing.
+
+## Local development and checks
+
+No new app packages are required. Use Node.js 22.13 or later. Existing dependencies suffice; a fresh checkout uses `npm ci`.
+
+Use `.env.pages.example` as the template for `.env.local`. Set the two real public Supabase values. Leave `NEXT_PUBLIC_BASE_PATH` empty for local development. Existing provider keys in `.env.local` are no longer used: the adviser now always runs in Supabase.
+
+```sh
+npm run dev
+npm test
+npm run build
+npm run typecheck
+node scripts/check-static-export.mjs
+npm start
+```
+
+Run `npm start` after stopping `npm run dev`, since both default to port 3000. `npm start` previews `out/` using a small local-only static server, not a production API. Requests still go to the deployed Supabase function. It automatically detects the exported base path.
+
+To verify the real project path in PowerShell:
+
+```powershell
+$env:NEXT_PUBLIC_BASE_PATH='/BizWise'
+npm run build
+node scripts/check-static-export.mjs
+npm start
+```
+
+Open `http://127.0.0.1:3000/BizWise/`. Clear that environment variable before returning to root-path development. Add the exact local origin to Supabase `ALLOWED_ORIGINS` if changing the port.
+
+Edge runtime typecheck (the first invocation downloads the Deno tooling):
+
+```sh
+npx --yes deno check --config supabase/functions/adviser/deno.json supabase/functions/adviser/index.ts
+```
+
+For optional local Edge Function development, copy `supabase/functions/.env.example` to ignored `supabase/functions/.env`, populate it privately, and use Supabase CLI's local stack and `functions serve`. Set the frontend's public Supabase URL/key to that local stack's values. Docker is required for the local Supabase stack; using the deployed function does not need Docker.
+
+## Test the app
+
+- **Sign-in and records:** Confirm email/sign in, load your existing shop, add a job and partial payment, save feedback, track actions and generate/edit an advert. Test a second account to confirm it cannot see the first account's records.
+- **Voice:** Adviser → Speak question → allow microphone → speak → Stop → review/edit → Ask. Use a supporting browser such as Chrome over HTTPS or localhost. Browser speech may send audio to its online service; unsupported browsers retain typed input. No speech API key is needed.
+- **Images:** Attach JPEG/PNG/WebP under 3 MB and 20 megapixels, preview/remove, then ask about a receipt. Review the extraction against the original and confirm before saving image-based advice. Jobs/payments are never automatically changed. Original image bytes are sent to Groq but not stored in Supabase; reviewed extraction/advice is saved with the action.
+- **Research:** Enable public web research or ask about competitors near your shop. Check the sources, excerpts, retrieval times and source dates. Serper receives the question and town, not the shop records or image. Public claims are kept separate from shop records; they do not establish local demand.
+
+## Troubleshooting
+
+- **README still shows:** Select GitHub Actions as the Pages source and check that the new Pages workflow deployed `out/` successfully.
+- **Missing Supabase values:** Set the two exact GitHub repository variable names, then rerun Pages. Editing `.env.local` does not update the hosted site.
+- **Adviser cannot connect:** Deploy the `adviser` function and set `ALLOWED_ORIGINS=https://alilitha.github.io` (plus any desired local origins). Inspect Supabase function logs for failures without logging keys or full request bodies.
+- **Session expired:** Sign in again. Authentication runs in the function even though platform JWT verification is disabled in its config.
+- **Missing Groq/Serper key:** Set the named secret in Supabase, not GitHub Pages. Check account/model access or quotas if a provider rejects it.
+- **Broken styles/scripts:** Rebuild through the supplied Pages workflow so its base path matches your Pages URL.
+
+Local verification passed: nine mocked-provider/auth/CORS tests, Next.js static build, frontend typecheck, Deno Edge Function typecheck and `/BizWise` asset/export checks. Live GitHub publication, Supabase function deployment, sign-in, real provider calls and physical microphone/mobile behavior still require account setup and live testing. No changes have been pushed or deployed by this local conversion.
