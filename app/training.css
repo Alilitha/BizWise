@@ -1,0 +1,14 @@
+.practice-tool { margin: 24px 0; padding: 22px; background: #f6f7f3; border: 1px solid #d5ddd4; border-radius: 8px; }
+.practice-tool-heading h4 { margin: 4px 0 12px; font-size: 1.1rem; color: #183b32; }
+.practice-tool p, .practice-tool legend { font-size: .9rem; line-height: 1.6; }
+.practice-tool fieldset { padding: 0; border: 0; margin: 16px 0 0; }
+.practice-tool .practice-check { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; font-weight: 400; }
+.practice-tool .practice-check input { width: 18px; height: 18px; flex: 0 0 18px; margin: 3px 0 0; accent-color: #245544; }
+.practice-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+.practice-inputs label { display: grid; gap: 7px; font-size: .9rem; }
+.practice-inputs input { width: 100%; min-width: 0; background: white; }
+.practice-result { display: block; margin: 12px 0 16px; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.conversation-tools form { display: grid; gap: 12px; margin: 18px 0; }
+.conversation-tools form label { display: grid; gap: 8px; }
+.conversation-tools form button { justify-self: start; }
+@media (max-width: 600px) { .practice-inputs { grid-template-columns: 1fr; } .practice-tool { padding: 16px; } }

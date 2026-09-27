@@ -1,6 +1,57 @@
 // The model selects a topic. It cannot author financial facts or business diagnoses.
 export const coachTopics = ['records', 'payments', 'costs', 'feedback', 'marketing', 'unknown'] as const;
 export type CoachTopic = typeof coachTopics[number];
+// Reviewed teaching material, not provider-generated tool claims or prices.
+export function digitalSkillsTraining(topic: CoachTopic): string {
+  if (topic === 'unknown') return 'CHOOSE YOUR TRAINING\n\nTell me what you need to do: keep records, check payments, understand costs, collect feedback or promote a service. I need that context before choosing a skill or tool.';
+  const guide = {
+    records: {
+      skill: 'Digital record keeping: distinguish a job, its direct costs and a payment.',
+      tool: 'Record checklist',
+      steps: 'Open Jobs & payments. Use a receipt to enter one job: date, service, amount charged and known direct costs. Add the payment separately only when money was received. Check the saved entry against the receipt.',
+      exercise: 'Use the checklist below with one receipt. An unchecked item means “not checked yet”, not zero. Do not fill gaps with estimates presented as facts.',
+      measure: 'Count how many receipts match saved entries, then resolve each mismatch. Aim for a complete match for the receipts you reviewed.',
+      offline: 'Write the same fields in a notebook when offline. Enter each record once when connected; check for an existing entry first.',
+    },
+    payments: {
+      skill: 'Payment reconciliation: match money received to the correct job before following up.',
+      tool: 'Payment balance worksheet',
+      steps: 'Open a job in Jobs & payments. Compare its agreed charge with receipts for payments against that job. Use the worksheet below to practise calculating the balance, then correct the saved records if needed.',
+      exercise: 'Enter the charge and total confirmed payments for one job. Balance = charge minus payments. A negative result is a credit to investigate, not another amount to collect.',
+      measure: 'Check that your worksheet result matches that job’s saved payment history. Only send a private reminder after resolving discrepancies.',
+      offline: 'Keep a paper payment log with date, job reference and amount. Reconcile it with BizWise when connected.',
+    },
+    costs: {
+      skill: 'Basic costing: calculate what remains after direct costs and distinguish it from net profit.',
+      tool: 'Direct-cost worksheet',
+      steps: 'Find the charge and materials/direct-cost receipts for one completed job. Enter them below, review the calculation, then update that job in Jobs & payments if its records are incomplete.',
+      exercise: 'Enter the charge and total direct costs. Contribution = charge minus direct costs. Contribution margin = contribution divided by charge × 100. A zero charge has no defined margin.',
+      measure: 'Match every input to a record. Before deciding a price, separately account for overheads, your time and other missing costs; this worksheet does not establish net profit.',
+      offline: 'Use a calculator and paper with columns for charge, materials and other direct costs. Keep the supporting receipts.',
+    },
+    feedback: {
+      skill: 'Digital feedback collection: ask a neutral question and separate observations from conclusions.',
+      tool: 'Feedback checklist',
+      steps: 'Ask “What worked well, and what could we improve?” Use Customer feedback to record the response. Ask customers consistently rather than selecting only those likely to praise you.',
+      exercise: 'Use the checklist below before recording one response. Choose one improvement to test and record what later customers say without claiming that a small sample represents everyone.',
+      measure: 'Track the number of people asked and the number who responded over the same period. Record mixed and negative feedback as well as positive feedback.',
+      offline: 'Ask verbally or use a short paper form. Explain why you are collecting feedback and enter only the information you need when connected.',
+    },
+    marketing: {
+      skill: 'Digital campaign measurement: turn a confirmed offer into a message and track enquiries separately from bookings.',
+      tool: 'Enquiry-to-booking worksheet',
+      steps: 'In Marketing, choose a saved service and an offer you can honour. Review the generated wording before copying it to a channel your customers use. In Actions & results, record enquiries and bookings for the same offer and period.',
+      exercise: 'Enter enquiries and resulting bookings from one campaign and period. Conversion = bookings divided by enquiries × 100. Use the same group of enquiries; do not combine unrelated bookings.',
+      measure: 'Record the channel and dates with the result. Compare like-for-like periods cautiously; the result does not prove the message caused a sale or predict future demand.',
+      offline: 'Record enquiries in a notebook or by phone. Paid advertising and a new software subscription are not required for this exercise.',
+    },
+  }[topic];
+  return ['DIGITAL SKILL TO LEARN', guide.skill, 'TOOL TO USE', guide.tool,
+    'GUIDED PRACTICE', guide.steps, guide.exercise, 'CHECK YOUR LEARNING', guide.measure,
+    'LOW-DATA OPTION', guide.offline, 'KEEP YOUR DATA PRIVATE',
+    'Use job references instead of customer names in practice tools. Do not paste passwords, identity numbers or banking details into the chat. Practice inputs below stay on this page and do not update business records.',
+    'TRAINING FOLLOW-UP', 'Tell me which step is difficult, which tool you can access, or what result you got. We can work through the next step together.'].join('\n\n');
+}
 export const followUpKinds = ['explain', 'small_step', 'outcome', 'correction'] as const;
 export type FollowUpKind = typeof followUpKinds[number];
 export function parseFollowUp(raw: string): FollowUpKind | undefined {
@@ -25,7 +76,7 @@ export function followUpAnswer(topic: CoachTopic, kind: FollowUpKind): string {
     outcome: 'REVIEW THE RESULT\n\nWhat did you try, what happened, and over what period? Compare the result with your original record. A change after an action does not prove the action caused it.\n\nRECORD IT\n\nUse Actions & results to enter enquiries, bookings or your own notes against the original action. Money received belongs in Jobs & payments. This conversation does not change either automatically.\n\nYOUR TURN\n\nWhat happened when you tried the step? Avoid customer names or contact details.',
     correction: 'THANK YOU FOR CORRECTING THAT\n\nTreat the previous suggestion as unsuitable until you have checked it. No score or decision about your business is made from your correction.\n\nWHAT SHOULD CHANGE?\n\nTell me whether the figures are wrong, the topic is wrong, or the step is impractical. Correct incorrect job/payment records at their source. For an unsuitable topic, start a new question in your own words.\n\nYOUR TURN\n\nWhat does not fit your situation?',
   };
-  return replies[kind];
+  return replies[kind] + '\n\n' + digitalSkillsTraining(topic);
 }
 export function parseCoachTopic(raw: string): CoachTopic {
   try {
@@ -55,6 +106,7 @@ export function groundedAnswer(topic: CoachTopic, facts: {
     'Missing records and overhead costs affect the picture. Customer retention cannot be calculated from the current inputs. This is a guided next step, not a verified diagnosis or a forecast.',
     research ? `Public research returned ${sourceCount} source excerpts. Review the separate sources for location and date; they are not verified business facts or evidence of local demand.` : 'No public web research was used.',
     hasImage ? 'Image transcription is unverified. Check every figure against the original; it is excluded from these calculations.' : '',
+    digitalSkillsTraining(topic),
     'YOUR TURN', 'Does this step fit your situation? You can ask why, choose a smaller step, correct the suggestion or come back with your result.',
   ].filter(Boolean).join('\n\n');
 }
