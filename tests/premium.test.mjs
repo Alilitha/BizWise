@@ -88,3 +88,12 @@ test('PDF text keeps readable punctuation and drops characters the built-in font
   assert.equal(pdfSafe('Grow 🚀 fast'), 'Grow  fast');
   assert.equal(pdfSafe('Café'), 'Café');
 });
+
+test('bias reports, uneven quality between topics and coverage gaps raise fairness alerts', () => {
+  const alerts = improvementAlerts({ ...healthy,
+    feedback: [{ topic: 'payments', ratings: 10, up: 9, down: 1, inaccurate: 0, unsafe: 0, biased: 1, satisfaction: 0.9 }, { topic: 'marketing', ratings: 5, up: 2, down: 3, inaccurate: 0, unsafe: 0, satisfaction: 0.4 }],
+    topics: [{ topic: 'unknown', requests: 20, declined: 12, declined_rate: 0.6 }, { topic: 'payments', requests: 30, declined: 0, declined_rate: 0 }] });
+  const bias = alerts.filter(alert => alert.category === 'bias').map(alert => alert.area);
+  assert.deepEqual(bias, ['Topic: payments', 'Uneven answer quality', 'Coverage: unknown']);
+  assert.ok(alerts.every(alert => alert.action.length > 10), 'every alert carries a next step');
+});

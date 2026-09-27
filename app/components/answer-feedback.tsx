@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 
-const TAGS = [["inaccurate", "Figures or facts are wrong"], ["not_relevant", "Not relevant to my business"], ["unclear", "Hard to understand"], ["unsafe", "Unsafe or inappropriate"]] as const;
+const TAGS = [["inaccurate", "Figures or facts are wrong"], ["not_relevant", "Not relevant to my business"], ["unclear", "Hard to understand"], ["biased", "Biased or unfair"], ["unsafe", "Unsafe or inappropriate"]] as const;
 type State = "asking" | "why" | "saving" | "thanks" | "failed";
 
 // Only the topic label, rating and reason are stored; not the question or answer text.

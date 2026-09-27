@@ -17,7 +17,7 @@ try {
       $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     grant usage on schema auth, public to anon, authenticated;
   `);
-  for (const file of ['20260925_bizwise.sql', '20260926_security_and_premium.sql', '20260927_least_privilege.sql', '20260928_telemetry_and_admin.sql']) {
+  for (const file of ['20260925_bizwise.sql', '20260926_security_and_premium.sql', '20260927_least_privilege.sql', '20260928_telemetry_and_admin.sql', '20260929_admin_console.sql']) {
     const sql = (await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), 'utf8'))
       .replace('create extension if not exists pgcrypto;', ''); // gen_random_uuid is built into modern PostgreSQL.
     await db.exec(sql);

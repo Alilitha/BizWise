@@ -79,7 +79,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000000002', true);
 do $$ begin
   perform public.record_ai_event('ask', 'payments', 'ok', 900, 120);
-  insert into public.ai_feedback(topic, rating, tag) values ('payments', -1, 'inaccurate');
+  insert into public.ai_feedback(topic, rating, tag) values ('payments', -1, 'inaccurate'), ('payments', -1, 'biased');
   if public.is_platform_admin() then raise exception 'Non-admin reported as admin'; end if;
   begin perform public.admin_telemetry(14); raise exception 'Non-admin read telemetry';
   exception when insufficient_privilege then null; end;
@@ -96,6 +96,9 @@ do $$ declare report jsonb; begin
   report := public.admin_telemetry(14);
   if (report->'daily'->0->>'requests')::int is distinct from 1 then raise exception 'Telemetry count wrong'; end if;
   if (report->'feedback'->0->>'inaccurate')::int is distinct from 1 then raise exception 'Accuracy report missing'; end if;
+  if (report->'feedback'->0->>'biased')::int is distinct from 1 then raise exception 'Bias report missing'; end if;
+  if (report->'topics'->0->>'topic') is distinct from 'payments' then raise exception 'Topic coverage missing'; end if;
+  if report->'recent'->0 ? 'owner_user_id' then raise exception 'Activity log exposes owner identity'; end if;
   if report::text ~ 'Private fixture' then raise exception 'Telemetry leaked business content'; end if;
 end $$;
 rollback;
