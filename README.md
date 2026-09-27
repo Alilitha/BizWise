@@ -1,4 +1,6 @@
-﻿# BizWise Garage — GitHub Pages + Supabase
+# BizWise — GitHub Pages + Supabase
+
+**Current release:** Apply the new `20260926_security_and_premium.sql` migration before deploying the updated adviser. See [security and release requirements](SECURITY-AND-RELEASE.md) for Premium access, saved learning progress, quotas, AI limitations and staging checks. The older setup notes below describe the initial deployment; this release does require the additional migration. Billing is not yet connected.
 
 The interface is a static Next.js export hosted at **https://alilitha.github.io/BizWise/**. Supabase handles sign-in, shop records and the adviser Edge Function. No Vercel or Next.js server is needed in production.
 

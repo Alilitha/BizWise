@@ -1,11 +1,12 @@
 {
-  "name": "bizwise-garage",
+  "name": "bizwise",
   "version": "0.1.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
+    "doctor:coach": "node scripts/check-coach-connection.mjs",
     "dev": "next dev -H 127.0.0.1",
     "build": "next build",
     "start": "node scripts/preview.mjs",
@@ -24,6 +25,7 @@
     "drizzle-orm": "0.45.2",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
+    "jspdf": "^3.0.4",
     "lucide-react": "^1.31.0",
     "next": "16.3.4",
     "next-themes": "^0.4.6",

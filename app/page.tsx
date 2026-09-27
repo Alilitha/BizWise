@@ -2,13 +2,39 @@
 
 import { AdviserInputs, Sources } from "./adviser/controls";
 import { type Advice, type WebSource } from "./adviser/shared";
-import { useEffect, useMemo, useState } from "react";
+import { CoachRequestError, requestCoach } from "./adviser/request";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createClient,
   type SupabaseClient,
   type User,
 } from "@supabase/supabase-js";
-import { ArrowRight, Plus, Wrench, LogOut } from "lucide-react";
+import { ArrowRight, ArrowUpRight, Plus, BriefcaseBusiness, LogOut, LayoutDashboard, MessageSquareText, ChartNoAxesCombined, CircleCheck, Megaphone, Star, Store, MapPin, Sparkles, Wallet, ReceiptText, Coins, ShieldCheck, Activity } from "lucide-react";
+import { Brand, WelcomePanel } from "./components/brand-and-insights";
+
+import { BusinessCoach, PremiumInsights, PremiumTeaser, CaptureOptions } from "./components/business-coach";
+import { PremiumReport, type PremiumAccess } from "./components/premium-report";
+import { PremiumCheckout } from "./components/premium-checkout";
+import { MarketingGenerator } from "./components/marketing-generator";
+import { AdminDashboard } from "./components/admin-dashboard";
+import { AnswerFeedback } from "./components/answer-feedback";
+import { computeMetrics } from "./premium/metrics";
+import { CoachConversation, CoachResponse, type ConversationTurn } from "./components/coach-conversation";
+import { PrivacyAndAccess } from "./components/privacy-and-access";
+
+const navigation = [
+  { key: "Home", label: "Business overview", icon: LayoutDashboard },
+  { key: "Jobs", label: "Jobs & payments", icon: BriefcaseBusiness },
+  { key: "Adviser", label: "Business coach", icon: Sparkles },
+  { key: "Insights", label: "Premium insights", icon: ChartNoAxesCombined },
+  { key: "Actions", label: "Actions & results", icon: CircleCheck },
+  { key: "Visibility", label: "Marketing", icon: Megaphone },
+  { key: "Feedback", label: "Customer feedback", icon: MessageSquareText },
+  { key: "Shop", label: "Business profile", icon: Store },
+  { key: "Privacy", label: "Privacy & access", icon: ShieldCheck },
+];
+const adminNavigation = { key: "Admin", label: "Admin monitoring", icon: Activity };
+const demoKey = (userId: string) => `bizwise-demo-premium:${userId}`;
 
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
@@ -26,6 +52,7 @@ type Job = {
   id: string;
   shop_id: string;
   service_id: string;
+  customer_id: string | null;
   job_date: string;
   description: string | null;
   status: string;
@@ -77,6 +104,11 @@ const money = (value: number) =>
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function Home() {
+  const loadVersion = useRef(0);
+  const coachRequestVersion = useRef(0);
+  const [conversation, setConversation] = useState<ConversationTurn[]>([]);
+  const [largerText, setLargerText] = useState(false);
+  const [recordsState, setRecordsState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("Home");
@@ -93,6 +125,11 @@ export default function Home() {
   const [feedback, setFeedback] = useState<Feedback[]>([]);
 
   const [authMode, setAuthMode] = useState("sign in");
+  const [showPlans, setShowPlans] = useState(false);
+  const [subscription, setSubscription] = useState<{ state: "checking" } | { state: "none" } | { state: "active"; expires: string }>({ state: "checking" });
+  const [demoReference, setDemoReference] = useState<string | null>(null);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -135,6 +172,24 @@ export default function Home() {
   const [fbRating, setFbRating] = useState("");
   const [fbComment, setFbComment] = useState("");
   const [period, setPeriod] = useState("all");
+  const [learned, setLearned] = useState<string[]>([]);
+  const [jobSearch, setJobSearch] = useState("");
+  const [jobStatus, setJobStatus] = useState("all");
+  const visibleJobs = jobs.filter(job => {
+    const service = services.find(item => item.id === job.service_id)?.name || "";
+    const matchesText = `${service} ${job.description || ""} ${job.job_date}`.toLowerCase().includes(jobSearch.trim().toLowerCase());
+    const paid = payments.filter(payment => payment.job_id === job.id).reduce((total, payment) => total + Number(payment.amount), 0);
+    const matchesStatus = jobStatus === "all" || (jobStatus === "unpaid"
+      ? job.status === "completed" && Number(job.amount_charged || 0) > paid
+      : job.status === jobStatus);
+    return matchesText && matchesStatus;
+  });
+
+  const premiumAccess: PremiumAccess = subscription.state === "active" ? { kind: "subscribed", expires: subscription.expires }
+    : demoReference ? { kind: "demo", reference: demoReference } : subscription.state === "checking" ? { kind: "checking" } : { kind: "locked" };
+  const premium = premiumAccess.kind === "subscribed" || premiumAccess.kind === "demo";
+  const metrics = useMemo(() => computeMetrics({ jobs, payments, feedback, actions }), [jobs, payments, feedback, actions]);
+  const tabs = isAdmin ? [...navigation, adminNavigation] : navigation;
 
   const clear = () => {
     setError("");
@@ -163,20 +218,26 @@ export default function Home() {
 
   async function load(owner: User) {
     if (!db) return;
+    const version = ++loadVersion.current;
+    setRecordsState('loading');
 
-    const sh = await db
-      .from("shops")
-      .select("*")
-      .eq("owner_user_id", owner.id)
-      .maybeSingle();
+    const [sh, admin] = await Promise.all([
+      db.from("shops").select("*").eq("owner_user_id", owner.id).maybeSingle(),
+      db.rpc("is_platform_admin"),
+    ]);
+
+    if (version !== loadVersion.current) return;
+    // Admins land on the console and can use it without a business profile.
+    if (admin.data === true) { setIsAdmin(true); setTab(current => current === "Home" ? "Admin" : current); }
 
     if (sh.error) {
-      setError(sh.error.message);
+      setError('Your business records could not be loaded. Your session may have expired. Retry, or sign out and sign in again.');
+      setRecordsState('error');
       return;
     }
 
     setShop(sh.data);
-    if (!sh.data) return;
+    if (!sh.data) { setRecordsState('ready'); return; }
 
     const id = sh.data.id;
     setShopName(sh.data.name);
@@ -195,8 +256,10 @@ export default function Home() {
     ]);
 
     const resultError = results.find(result => result.error)?.error;
+    if (version !== loadVersion.current) return;
     if (resultError) {
-      setError(resultError.message);
+      setError('Your business records could not be loaded. Please retry before making changes.');
+      setRecordsState('error');
       return;
     }
 
@@ -206,18 +269,62 @@ export default function Home() {
     setActions(results[3].data || []);
     setAssets(results[4].data || []);
     setFeedback(results[5].data || []);
+    setRecordsState('ready');
+    const [progress, entitlement] = await Promise.all([
+      db.from("learning_progress").select("lesson_key").eq("owner_user_id", owner.id),
+      db.from("business_entitlements").select("expires_at").eq("owner_user_id", owner.id).maybeSingle(),
+    ]);
+    if (version !== loadVersion.current) return;
+    setLearned(progress.error ? [] : (progress.data || []).map(item => item.lesson_key));
+    const expires = entitlement.data?.expires_at;
+    setSubscription(expires && new Date(expires) > new Date() ? { state: "active", expires } : { state: "none" });
+  }
+
+  function activateDemo(reference: string) {
+    setDemoReference(reference);
+    try { if (user) localStorage.setItem(demoKey(user.id), reference); } catch { /* Demo stays active for this session only. */ }
+  }
+
+  const authorize = async () => {
+    if (!db || !user) throw new CoachRequestError('Sign in first.');
+    const { data: { session } } = await db.auth.getSession();
+    if (!session || session.user.id !== user.id) throw new CoachRequestError('Your sign-in has expired. Sign out and sign in again, then retry.');
+    return { url: URL, key: KEY, token: session.access_token, origin: window.location.origin };
+  };
+
+  async function completeLesson(topic: string) {
+    if (!db || !user) return;
+    try {
+      const result = await db.from("learning_progress").insert({ owner_user_id: user.id, lesson_key: topic });
+      if (result.error && result.error.code !== "23505") { setError("Your guide completion could not be saved. Please try again later."); return; }
+      setLearned(current => [...new Set([...current, topic])]);
+      setMessage("Guide completed. Put the skill into practice, then record the result.");
+    } catch { setError("Could not save your progress. Check your connection."); }
   }
 
   useEffect(() => {
+    ++loadVersion.current;
+    ++coachRequestVersion.current;
+    setConversation([]);
+    setBusy(false);
+    setShop(null); setJobs([]); setPayments([]); setServices([]);
+    setActions([]); setAssets([]); setFeedback([]); setLearned([]);
+    setSubscription({ state: "checking" }); setIsAdmin(false); setCheckoutOpen(false); setTab("Home");
+    let storedDemo: string | null = null;
+    try { storedDemo = user ? localStorage.getItem(demoKey(user.id)) : null; } catch { /* Storage unavailable. */ }
+    setDemoReference(storedDemo);
     if (user) {
       void load(user);
     } else {
       setShop(null);
       setJobs([]);
+      setPayments([]); setServices([]); setActions([]); setAssets([]); setFeedback([]);
+      setShopName(""); setTown(""); setPhone(""); setPassword("");
+      setLearned([]);
     }
     setImage(null); setAdvice(null); setPendingAdvice(null); setFiguresConfirmed(false);
     setAnswer(""); setQuestion(""); setCurrentAction(null); setAdText("");
-  }, [user]);
+  }, [user?.id]);
 
   async function handleAuth(event: React.FormEvent) {
     event.preventDefault();
@@ -416,40 +523,34 @@ export default function Home() {
       return amount + Math.max(0, Number(job.amount_charged || 0) - paid);
     }, 0);
 
-  async function callAi(which: string) {
+  async function callAi(which: string, followUp?: string, suppliedQuestion?: string) {
     if (!db || !shop || !user) return;
-
+    const version = ++coachRequestVersion.current;
+    const requestQuestion = suppliedQuestion || question;
+    const parentAction = which === 'ask' ? currentAction : null;
     clear();
     setBusy(true);
-    if (which === "ask") { setPendingAdvice(null); setFiguresConfirmed(false); setCurrentAction(null); setAnswer(""); setAdvice(null); setAdText(""); }
+    if (which === "ask") { setFiguresConfirmed(false); setAdText(""); }
 
     try {
       const { data: { session } } = await db.auth.getSession();
-
-      const response = await fetch(`${URL.replace(/\/$/, "")}/functions/v1/adviser`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.access_token || ""}`,
-          apikey: KEY,
-        },
-        body: JSON.stringify({
+      if (version !== coachRequestVersion.current) return;
+      if (!session || session.user.id !== user.id) throw new CoachRequestError('Your sign-in has expired. Sign out and sign in again, then retry your question.');
+      const data = await requestCoach({
+        url: URL, key: KEY, token: session.access_token, origin: window.location.origin,
+        body: {
           goal: which,
-          image: which === "ask" ? image : undefined,
-          research: which === "ask" && research,
-          question,
+          image: which === "ask" && !followUp ? image : undefined,
+          research: which === "ask" && !followUp && research,
+          question: requestQuestion,
+          ...(parentAction ? { parent_action_id: parentAction } : {}),
+          ...(followUp ? { follow_up: followUp } : {}),
           offer,
           service: adService,
           channel: adChannel,
-        }),
+        },
       });
-
-      const data = await response.json().catch(() => ({ error: "Adviser function unavailable. Deploy the Supabase adviser function and check its configuration." })) as Advice & { error?: string };
-
-      if (!response.ok) {
-        setError(data.error || "AI request failed");
-        return;
-      }
+      if (version !== coachRequestVersion.current) return;
 
       if (which === "advert") {
         setAdText(data.answer);
@@ -458,24 +559,30 @@ export default function Home() {
 
       setAnswer(data.answer);
       setAdvice(data);
+      setCurrentAction(null);
+      setPendingAdvice(null);
+      setQuestion('');
+      setConversation(turns => [...turns, { question: requestQuestion, answer: data.answer }].slice(-12));
       if (data.extraction) {
         setPendingAdvice(data);
       } else {
-        await saveAdvice(data);
+        try { await saveAdvice(data, version); }
+        catch { if (version === coachRequestVersion.current) setError('Your coach replied, but the recommendation could not be saved. Keep this response and check your connection before continuing.'); }
       }
-    } catch {
-      setError("Could not contact the adviser. Check your connection and the deployed Supabase function?s ALLOWED_ORIGINS setting.");
+    } catch (error) {
+      if (version === coachRequestVersion.current) setError(error instanceof CoachRequestError ? error.message : 'The coaching request could not be prepared. Your question has been kept. Please try again.');
     } finally {
-      setBusy(false);
+      if (version === coachRequestVersion.current) setBusy(false);
     }
   }
 
-  async function saveAdvice(data: Advice) {
+  async function saveAdvice(data: Advice, expectedVersion = coachRequestVersion.current) {
     if (!db || !shop || !user) return;
     const saved = await db.from("adviser_actions").insert({
       shop_id: shop.id, goal: data.goal, evidence_json: data.evidence,
       recommendation: data.answer, limitations: data.evidence.limitations, status: "planned",
     }).select("id").single();
+    if (expectedVersion !== coachRequestVersion.current) return;
     if (saved.error) { setError(saved.error.message); return; }
     setPendingAdvice(null);
     setCurrentAction(saved.data.id);
@@ -620,19 +727,24 @@ export default function Home() {
   }
 
   if (!user) {
+    if (showPlans) return <main className="public-plans"><header><Brand/><button className="ghost" onClick={() => setShowPlans(false)}>Back to sign in <ArrowRight size={16}/></button></header><PremiumInsights ctaLabel="Sign in to upgrade" onUpgrade={() => setShowPlans(false)}/></main>;
     return (
-      <main className="shell">
+      <main className="auth-shell">
+        <WelcomePanel/>
+        <section className="auth-side">
+        <div className="auth-mobile-brand"><Brand/></div>
         <div className="card auth">
-          <div className="brand">Biz<span>Wise</span> Garage</div>
-          <h1>Run your shop with clearer numbers.</h1>
-          <p className="muted">
-            Record work, understand costs and choose your next customer action.
-          </p>
+          <span className="eyebrow">YOUR BUSINESS WORKSPACE</span>
+          <h2>{authMode === "sign in" ? "Sign in to your workspace" : "Start with your business."}</h2>
+          <p className="muted">{authMode === "sign in" ? "Sign in to pick up where you left off." : "Create an account to record your work and get practical guidance."}</p>
 
           <form className="form" onSubmit={handleAuth}>
             <div>
-              <label>Email</label>
+              <label htmlFor="auth-email">Email address</label>
               <input
+                id="auth-email"
+                autoComplete="email"
+                placeholder="you@yourbusiness.co.za"
                 type="email"
                 required
                 value={email}
@@ -640,8 +752,11 @@ export default function Home() {
               />
             </div>
             <div>
-              <label>Password</label>
+              <label htmlFor="auth-password">Password</label>
               <input
+                id="auth-password"
+                autoComplete={authMode === "sign in" ? "current-password" : "new-password"}
+                placeholder="Enter your password"
                 type="password"
                 required
                 minLength={6}
@@ -688,80 +803,73 @@ export default function Home() {
           </div>
 
           {message && <div className="notice">{message}</div>}
-          {error && <div className="notice error">{error}</div>}
+          {error && <div className="notice error" role="alert">{error}</div>}
+          <div className="auth-trust"><ShieldCheck size={16}/> A dedicated space for your business.</div>
+          <button className="auth-plans-link" onClick={() => setShowPlans(true)}>Free to start. Explore Premium <ArrowUpRight size={15}/></button>
         </div>
+        <p className="auth-copyright">Built for South African micro and small businesses.</p>
+        </section>
       </main>
     );
   }
 
   return (
-    <main className="shell">
-      <header className="top">
-        <div>
-          <div className="brand">Biz<span>Wise</span> Garage</div>
-          <div className="muted compact">
-            {shop ? `${shop.name} · ${shop.town}` : "Set up your shop"}
-          </div>
-        </div>
-        <button className="ghost" onClick={() => db.auth.signOut()}>
-          <LogOut size={16} style={{ display: "inline", verticalAlign: "middle" }} />
-          {" "}Sign out
-        </button>
+    <main className={`app-shell${largerText ? ' larger-text' : ''}`}>
+      <a className="skip-link" href="#workspace">Skip to content</a>
+      <header className="app-header">
+        <Brand/>
+        <button className="text-size-toggle" aria-pressed={largerText} onClick={()=>setLargerText(value=>!value)}>Aa <span>{largerText ? 'Standard text' : 'Larger text'}</span></button>
+        <div className="business-identity"><span className="business-avatar">{(shop?.name || "B").slice(0,1).toUpperCase()}</span><div><strong>{shop?.name || "Your business"}</strong><span><MapPin size={12}/>{shop?.town || "Let us get you set up"}</span></div></div>
+        <button className="ghost signout" aria-label="Sign out" onClick={() => db.auth.signOut()}><LogOut size={16}/><span>Sign out</span></button>
       </header>
-
-      {shop && (
+      <aside className="sidebar">
+        <p className="nav-caption">WORKSPACE</p>
         <nav className="nav" aria-label="Main navigation">
-          {["Home", "Jobs", "Adviser", "Actions", "Feedback", "Shop"].map(item => (
-            <button
-              key={item}
-              className={tab === item ? "active" : ""}
-              onClick={() => {
-                clear();
-                setTab(item);
-              }}
-            >
-              {item}
-            </button>
+          {tabs.map(({ key, label, icon: Icon }) => (
+            <button key={key} disabled={!shop && key !== "Admin"} aria-current={tab === key ? "page" : undefined} className={tab === key ? "active" : ""} onClick={() => { clear(); setTab(key); }}><Icon size={19}/><span>{label}</span>{key === "Insights" && <span className="nav-ai">PRO</span>}</button>
           ))}
         </nav>
-      )}
-
+        <div className="sidebar-note"><span className="section-kicker">BIZWISE PREMIUM</span><h3>Make more of your business data.</h3><p>Explore deeper insights and planned learning paths.</p><button disabled={!shop} onClick={() => setTab("Insights")}>Explore Premium <ArrowUpRight size={16}/></button></div>
+        <div className="sidebar-footer"><span className="status-dot"/> Built around your business</div>
+      </aside>
+      <div className="workspace" id="workspace" tabIndex={-1}>
+      <div className="workspace-heading"><div><p className="eyebrow">BUSINESS WORKSPACE</p><h1>{shop || (isAdmin && tab === "Admin") ? tabs.find(item => item.key === tab)?.label : "Set up your business"}</h1></div><span className="workspace-context"><Store size={15}/>{shop?.town || "Getting started"}</span></div>
       {error && <div className="notice error" role="alert">{error}</div>}
       {message && <div className="notice" role="status">{message}</div>}
 
-      {!shop ? (
+      {isAdmin && tab === "Admin" ? <AdminDashboard db={db}/> : recordsState === 'error' ? <section className="card"><h2>Let’s reconnect your workspace</h2><p>Your records have not been replaced. Check your connection, or sign in again if your session has expired.</p><div className="actions"><button className="primary" onClick={()=>{clear(); void load(user);}}>Retry loading</button><button className="ghost" onClick={()=>db.auth.signOut()}>Sign out</button></div></section> : !shop && recordsState === 'loading' ? <section className="card" role="status"><h2>Loading your business</h2><p>Checking your account and saved records…</p></section> : !shop ? (
         <div className="card" style={{ maxWidth: 660 }}>
-          <h1>Tell us about your shop</h1>
+          <h2>Tell us about your business</h2>
           <p className="muted">
             Start with the basics. You can add services afterwards.
           </p>
           <form className="form" onSubmit={saveShop}>
             <div>
-              <label>Shop name</label>
-              <input
+              <label htmlFor="field-1">Business name</label>
+              <input id="field-1"
                 required
                 value={shopName}
                 onChange={event => setShopName(event.target.value)}
               />
             </div>
             <div>
-              <label>Town or suburb</label>
-              <input
+              <label htmlFor="field-2">Town or suburb</label>
+              <input id="field-2"
                 required
                 value={town}
                 onChange={event => setTown(event.target.value)}
               />
             </div>
             <div>
-              <label>WhatsApp number (optional)</label>
-              <input
+              <label htmlFor="field-3">WhatsApp number (optional)</label>
+              <input id="field-3"
                 value={phone}
                 onChange={event => setPhone(event.target.value)}
               />
             </div>
             <div className="full">
               <button className="primary" disabled={busy}>
-                Save shop <ArrowRight size={16} style={{ display: "inline" }} />
+                Save business <ArrowRight size={16} style={{ display: "inline" }} />
               </button>
             </div>
           </form>
@@ -770,20 +878,14 @@ export default function Home() {
         <>
           {tab === "Home" && (
             <>
-              <section className="hero">
-                <h1>Good day. What needs attention?</h1>
-                <p>
-                  Keep a record of each job, then use those figures to make a
-                  practical next move.
-                </p>
-                <button className="primary" onClick={() => openJob()}>
-                  <Plus size={16} style={{ display: "inline" }} /> Add a job
-                </button>
-              </section>
+              <div className="overview-intro"><div><span className="section-kicker">UNDERSTAND. LEARN. ACT. IMPROVE.</span><h2>What needs your attention?</h2><p>A practical next step, grounded in what is happening in your business.</p></div><span className="workspace-plan">FREE WORKSPACE</span></div>
+              <BusinessCoach outstanding={outstanding} jobCount={jobs.filter(job => job.status === "completed").length} feedbackCount={feedback.length} onNavigate={setTab} learned={learned} onLearn={completeLesson}/>
+              <CaptureOptions onRecord={() => openJob()} onCoach={() => setTab("Adviser")}/>
 
-              <div className="actions" style={{ marginBottom: 16 }}>
-                <label style={{ alignSelf: "center", margin: 0 }}>Period</label>
+              <div className="overview-toolbar">
+                <label htmlFor="overview-period" style={{ alignSelf: "center", margin: 0 }}>Your business at a glance</label>
                 <select
+                  id="overview-period"
                   style={{ width: 170 }}
                   value={period}
                   onChange={event => setPeriod(event.target.value)}
@@ -795,26 +897,26 @@ export default function Home() {
 
               <div className="stats">
                 <div className="card stat">
-                  <small>Completed jobs</small>
+                  <span className="stat-icon"><BriefcaseBusiness size={19}/></span><small>Completed jobs</small>
                   <strong>{completed.length}</strong>
                 </div>
                 <div className="card stat">
-                  <small>Amount charged</small>
+                  <span className="stat-icon"><ReceiptText size={19}/></span><small>Amount charged</small>
                   <strong>{money(charge)}</strong>
                 </div>
                 <div className="card stat">
-                  <small>Payments received</small>
+                  <span className="stat-icon"><Wallet size={19}/></span><small>Payments received</small>
                   <strong>{money(received)}</strong>
                 </div>
                 <div className="card stat">
-                  <small>Recorded direct costs</small>
+                  <span className="stat-icon"><Coins size={19}/></span><small>Recorded direct costs</small>
                   <strong>{money(costs)}</strong>
                 </div>
               </div>
 
-              <div className="grid" style={{ marginTop: 16 }}>
+              <div className="grid money-grid" style={{ marginTop: 20 }}>
                 <div className="card">
-                  <h2>Money to follow up</h2>
+                  <span className="eyebrow">PAYMENTS TO COLLECT</span><h2>Money to follow up</h2>
                   <p style={{ fontSize: 30, fontWeight: 800 }}>
                     {money(outstanding)}
                   </p>
@@ -826,7 +928,7 @@ export default function Home() {
                   </button>
                 </div>
                 <div className="card">
-                  <h2>Left after recorded direct costs</h2>
+                  <span className="eyebrow">CHARGES LESS DIRECT COSTS</span><h2>After your direct costs</h2>
                   <p style={{ fontSize: 30, fontWeight: 800 }}>
                     {money(charge - costs)}
                   </p>
@@ -839,33 +941,37 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+              <PremiumTeaser onOpen={() => setTab("Insights")}/>
+
             </>
           )}
+
+          {tab === "Insights" && <PremiumReport key={user.id} access={premiumAccess} shopName={shop.name} businessType={services[0]?.name || ""} metrics={metrics} onUpgrade={() => setCheckoutOpen(true)} authorize={authorize}/>}          {tab === "Privacy" && <PrivacyAndAccess/>}
 
           {tab === "Shop" && (
             <div className="grid">
               <div className="card">
-                <h2>Shop details</h2>
+                <h2>Business details</h2>
                 <form className="form" onSubmit={saveShop}>
                   <div>
-                    <label>Shop name</label>
-                    <input
+                    <label htmlFor="field-4">Business name</label>
+                    <input id="field-4"
                       required
                       value={shopName}
                       onChange={event => setShopName(event.target.value)}
                     />
                   </div>
                   <div>
-                    <label>Town</label>
-                    <input
+                    <label htmlFor="field-5">Town</label>
+                    <input id="field-5"
                       required
                       value={town}
                       onChange={event => setTown(event.target.value)}
                     />
                   </div>
                   <div>
-                    <label>WhatsApp number</label>
-                    <input
+                    <label htmlFor="field-6">WhatsApp number</label>
+                    <input id="field-6"
                       value={phone}
                       onChange={event => setPhone(event.target.value)}
                     />
@@ -881,7 +987,7 @@ export default function Home() {
                 {services.map(service => (
                   <div className="row" key={service.id}>
                     <span>
-                      <Wrench size={16} style={{ display: "inline" }} />
+                      <BriefcaseBusiness size={16} style={{ display: "inline" }} />
                       {" "}{service.name}
                     </span>
                   </div>
@@ -890,7 +996,7 @@ export default function Home() {
                   <label>Add a service</label>
                   <div className="actions" style={{ marginTop: 5 }}>
                     <input
-                      placeholder="e.g. Brake repairs"
+                      placeholder="e.g. Hair styling, repairs or cleaning"
                       value={serviceName}
                       onChange={event => setServiceName(event.target.value)}
                       style={{ flex: 1 }}
@@ -913,7 +1019,7 @@ export default function Home() {
             <>
               <div className="top">
                 <div>
-                  <h1>Jobs and payments</h1>
+                  <h2>Every job. Every payment.</h2>
                   <p className="muted">
                     Record the work, then record money when it is actually paid.
                   </p>
@@ -937,8 +1043,8 @@ export default function Home() {
                   <h2>{jobEdit ? "Edit job" : "New job"}</h2>
                   <form className="form" onSubmit={saveJob}>
                     <div>
-                      <label>Service</label>
-                      <select
+                      <label htmlFor="field-7">Service</label>
+                      <select id="field-7"
                         required
                         value={jobForm.service_id}
                         onChange={event => setJobForm({
@@ -955,8 +1061,8 @@ export default function Home() {
                       </select>
                     </div>
                     <div>
-                      <label>Job date</label>
-                      <input
+                      <label htmlFor="field-8">Job date</label>
+                      <input id="field-8"
                         type="date"
                         required
                         value={jobForm.job_date}
@@ -967,8 +1073,8 @@ export default function Home() {
                       />
                     </div>
                     <div>
-                      <label>Job status</label>
-                      <select
+                      <label htmlFor="field-9">Job status</label>
+                      <select id="field-9"
                         value={jobForm.status}
                         onChange={event => setJobForm({
                           ...jobForm,
@@ -981,8 +1087,8 @@ export default function Home() {
                       </select>
                     </div>
                     <div>
-                      <label>Amount charged (R)</label>
-                      <input
+                      <label htmlFor="field-10">Amount charged (R)</label>
+                      <input id="field-10"
                         type="number"
                         min="0"
                         step="0.01"
@@ -995,8 +1101,8 @@ export default function Home() {
                       />
                     </div>
                     <div>
-                      <label>Parts cost (R)</label>
-                      <input
+                      <label htmlFor="field-11">Materials / parts cost (R)</label>
+                      <input id="field-11"
                         type="number"
                         min="0"
                         step="0.01"
@@ -1008,8 +1114,8 @@ export default function Home() {
                       />
                     </div>
                     <div>
-                      <label>Other direct cost (R)</label>
-                      <input
+                      <label htmlFor="field-12">Other direct cost (R)</label>
+                      <input id="field-12"
                         type="number"
                         min="0"
                         step="0.01"
@@ -1021,8 +1127,8 @@ export default function Home() {
                       />
                     </div>
                     <div className="full">
-                      <label>Description (optional)</label>
-                      <textarea
+                      <label htmlFor="field-13">Description (optional)</label>
+                      <textarea id="field-13"
                         value={jobForm.description}
                         onChange={event => setJobForm({
                           ...jobForm,
@@ -1060,11 +1166,16 @@ export default function Home() {
               )}
 
               <div className="card">
+                <div className="jobs-toolbar">
+                  <input aria-label="Search jobs" placeholder="Search services, notes or dates…" value={jobSearch} onChange={event => setJobSearch(event.target.value)}/>
+                  <select aria-label="Filter jobs" value={jobStatus} onChange={event => setJobStatus(event.target.value)}><option value="all">All jobs</option><option value="unpaid">Payment due</option><option value="completed">Completed</option><option value="draft">Draft</option><option value="cancelled">Cancelled</option></select>
+                  <span className="results-count" role="status">{visibleJobs.length} {visibleJobs.length === 1 ? "job" : "jobs"}</span>
+                </div>
                 {jobs.length === 0 ? (
                   <div className="empty">
-                    No jobs yet. Add a completed job to see useful figures.
+                    <BriefcaseBusiness size={32}/><strong>Your work belongs here.</strong><p>Record your first job to start building a clearer picture.</p><button className="primary" onClick={() => openJob()}>Record a job <Plus size={16}/></button>
                   </div>
-                ) : jobs.map(job => {
+                ) : visibleJobs.length === 0 ? <div className="empty"><BriefcaseBusiness size={30}/><strong>No matching jobs</strong><p>Try another search or show all jobs.</p><button className="ghost" onClick={() => {setJobSearch(""); setJobStatus("all");}}>Clear filters</button></div> : visibleJobs.map(job => {
                   const paid = payments
                     .filter(payment => payment.job_id === job.id)
                     .reduce(
@@ -1073,8 +1184,9 @@ export default function Home() {
                     );
 
                   return (
-                    <div className="row" key={job.id}>
+                    <div className="row job-row" key={job.id}>
                       <div>
+                        <span className={`pill job-status ${job.status}`}>{job.status === "completed" ? Number(job.amount_charged || 0) <= paid ? "Paid" : paid > 0 ? "Part paid" : "Payment due" : job.status}</span>
                         <strong>
                           {services.find(service =>
                             service.id === job.service_id
@@ -1133,8 +1245,8 @@ export default function Home() {
                   <h2>Record a payment</h2>
                   <form className="form" onSubmit={savePayment}>
                     <div>
-                      <label>Amount received (R)</label>
-                      <input
+                      <label htmlFor="field-14">Amount received (R)</label>
+                      <input id="field-14"
                         type="number"
                         min="0.01"
                         step="0.01"
@@ -1144,8 +1256,8 @@ export default function Home() {
                       />
                     </div>
                     <div>
-                      <label>Method</label>
-                      <select
+                      <label htmlFor="field-15">Method</label>
+                      <select id="field-15"
                         value={payMethod}
                         onChange={event => setPayMethod(event.target.value)}
                       >
@@ -1174,10 +1286,11 @@ export default function Home() {
           {tab === "Adviser" && (
             <div className="grid">
               <div className="card">
-                <h1>Ask BizWise</h1>
+                <span className="eyebrow"><Sparkles size={14}/> YOUR BUSINESS COACH</span><h2>What is happening in your business?</h2>
                 <p className="muted">
-                  Describe your situation in your own words. BizWise uses the
-                  records you have saved.
+                  Get a short guide and one practical next step for payments,
+                  costs, records, feedback or marketing. Figures are calculated
+                  from your saved records; AI helps select the topic.
                 </p>
                 <label htmlFor="bizwise-question">
                   What would you like advice on?
@@ -1194,10 +1307,11 @@ export default function Home() {
                 <p className="muted compact">
                   Ask about jobs, prices, payments, customers or feedback.
                 </p>
+                <div className="question-prompts" aria-label="Question ideas">{["Which unpaid jobs should I follow up first?", "Which services bring in the most income?", "What are competitors near my shop offering?"].map(prompt => <button key={prompt} type="button" disabled={busy || listening} onClick={() => setQuestion(prompt)}>{prompt}<ArrowUpRight size={13}/></button>)}</div>
                 <div className="actions">
                   <button
                     className="primary"
-                    disabled={busy || listening || question.trim().length < 8}
+                    disabled={busy || listening || !!pendingAdvice || question.trim().length < 8}
                     onClick={() => callAi("ask")}
                   >
                     {busy ? "Thinking…" : "Ask BizWise"}
@@ -1212,32 +1326,44 @@ export default function Home() {
               </div>
 
               <div className="card">
-                <h2>Your recommendation</h2>
+                <div className="section-heading"><h2>Your next move</h2><span className="mini-icon"><Sparkles size={18}/></span></div>
                 {answer ? (
                   <>
                     {advice?.extraction && <div className="notice"><h3>What was read from your image</h3><p className="answer">{advice.extraction}</p><p>These figures may be wrong. Compare every amount, date and quantity against the original. If incorrect, replace or crop the image and ask again. Nothing is entered into jobs or payments automatically.</p></div>}
-                    <div className="answer">{answer}</div>
+                    {conversation.length > 0 && <p className="conversation-question">You asked: {conversation[conversation.length - 1].question}</p>}
+                    <CoachResponse answer={answer}/>
+                    {advice?.evidence.coach_topic && <AnswerFeedback key={advice.evidence.generated_at} db={db} topic={advice.evidence.coach_topic}/>}
+                    <CoachConversation turns={conversation} busy={busy} canContinue={!!currentAction && !pendingAdvice} onFollowUp={(kind,text)=>void callAi('ask',kind,text)} onReset={()=>{ ++coachRequestVersion.current; setConversation([]); setAnswer(''); setAdvice(null); setCurrentAction(null); setPendingAdvice(null); setImage(null); setQuestion(''); }}/>
+                    {advice?.evidence.method && <details className="advice-receipt"><summary>How this response was prepared</summary><p>Method: {advice.evidence.method}. {advice.evidence.generated_at && `Prepared: ${new Date(advice.evidence.generated_at).toLocaleString('en-ZA')}.`} Figures come from your saved records. Guides are reviewed templates; AI routes typed questions to a topic. This is not an independent audit.</p></details>}
                     <Sources sources={advice?.evidence.web_sources} searched={advice?.evidence.web_searched}/>
                     {pendingAdvice && <div className="notice"><label className="research-toggle"><input type="checkbox" checked={figuresConfirmed} onChange={event => setFiguresConfirmed(event.target.checked)}/> I checked the extracted figures against the original and confirm they are correct.</label><button className="primary" disabled={busy || !figuresConfirmed} onClick={confirmImageAdvice}>Confirm and save advice</button><p className="compact">Only the advice and reviewed extraction will be saved. Use Jobs or Payments to enter business records manually.</p></div>}
                   </>
                 ) : (
                   <div className="empty">
-                    Describe your situation to get advice based on your shop
-                    records.
+                    <Sparkles size={32}/><strong>Clarity starts with a question.</strong><p>Ask about your business to get a practical next step grounded in your records.</p>
                   </div>
                 )}
               </div>
 
+              {currentAction && <div className="card full adviser-next"><div><h3>Put your next move into words.</h3><p className="muted">Turn a confirmed offer into an editable customer advert.</p></div><button className="dark" onClick={() => setTab("Visibility")}>Create an advert <ArrowUpRight size={16}/></button></div>}
+            </div>
+          )}
+
+          {tab === "Visibility" && (
+            <div className="grid">
+              <MarketingGenerator services={services.map(service => service.name)} premium={premium} onUpgrade={() => setCheckoutOpen(true)} authorize={authorize}/>
               <div className="card full">
-                <h2>Create a customer advert</h2>
+                <span className="eyebrow">SHOW UP FOR YOUR NEXT CUSTOMER</span><h2>Create a customer advert</h2>
                 <p className="muted">
                   Confirm the service and offer first. You can edit every word
                   before sharing.
                 </p>
-                <div className="form">
+                <label htmlFor="advert-action">Link to a saved action</label>
+                <select id="advert-action" value={currentAction || ""} onChange={event => { setCurrentAction(event.target.value || null); setAdText(""); }}><option value="">Choose an action</option>{actions.map(action => <option key={action.id} value={action.id}>{action.evidence_json?.owner_question || "BizWise advice"}</option>)}</select>
+                <div className="form" style={{ marginTop: 20 }}>
                   <div>
-                    <label>Service</label>
-                    <select
+                    <label htmlFor="field-16">Service</label>
+                    <select id="field-16"
                       value={adService}
                       onChange={event => setAdService(event.target.value)}
                     >
@@ -1248,8 +1374,8 @@ export default function Home() {
                     </select>
                   </div>
                   <div>
-                    <label>Channel</label>
-                    <select
+                    <label htmlFor="field-17">Channel</label>
+                    <select id="field-17"
                       value={adChannel}
                       onChange={event => setAdChannel(event.target.value)}
                     >
@@ -1258,9 +1384,9 @@ export default function Home() {
                     </select>
                   </div>
                   <div className="full">
-                    <label>Confirmed offer or message</label>
-                    <input
-                      placeholder="e.g. Book a brake inspection. No discount."
+                    <label htmlFor="field-18">Confirmed offer or message</label>
+                    <input id="field-18"
+                      placeholder="e.g. Book a consultation this week. No discount."
                       value={offer}
                       onChange={event => setOffer(event.target.value)}
                     />
@@ -1309,13 +1435,13 @@ export default function Home() {
 
           {tab === "Actions" && (
             <>
-              <h1>Actions and results</h1>
+              <h2>Turn advice into progress.</h2>
               <p className="muted">
                 Track what you tried and the results you recorded yourself.
               </p>
               {actions.length === 0 ? (
                 <div className="card empty">
-                  Ask BizWise for advice to create your first action.
+                  <CircleCheck size={32}/><strong>Good advice deserves a next step.</strong><p>Ask BizWise a question to start tracking your actions.</p><button className="primary" onClick={() => setTab("Adviser")}>Ask BizWise <ArrowUpRight size={16}/></button>
                 </div>
               ) : (
                 <div className="stack">
@@ -1370,8 +1496,8 @@ export default function Home() {
 
                       <div className="form">
                         <div>
-                          <label>Enquiries</label>
-                          <input
+                          <label htmlFor="field-19">Enquiries</label>
+                          <input id="field-19"
                             type="number"
                             min="0"
                             value={action.enquiries}
@@ -1390,8 +1516,8 @@ export default function Home() {
                           />
                         </div>
                         <div>
-                          <label>Bookings</label>
-                          <input
+                          <label htmlFor="field-20">Bookings</label>
+                          <input id="field-20"
                             type="number"
                             min="0"
                             max={action.enquiries}
@@ -1411,8 +1537,8 @@ export default function Home() {
                           />
                         </div>
                         <div>
-                          <label>Completed jobs from bookings</label>
-                          <input
+                          <label htmlFor="field-21">Completed jobs from bookings</label>
+                          <input id="field-21"
                             type="number"
                             min="0"
                             max={action.bookings}
@@ -1432,8 +1558,8 @@ export default function Home() {
                           />
                         </div>
                         <div>
-                          <label>Status</label>
-                          <select
+                          <label htmlFor="field-22">Status</label>
+                          <select id="field-22"
                             value={action.status}
                             onChange={event =>
                               setActions(current =>
@@ -1482,12 +1608,12 @@ export default function Home() {
           {tab === "Feedback" && (
             <div className="grid">
               <div className="card">
-                <h1>Customer feedback</h1>
+                <h2>Listen. Learn. Build loyalty.</h2>
                 <p className="muted">
                   Ask a customer, then record the answer you actually receive.
                 </p>
-                <label>Completed job</label>
-                <select
+                <label htmlFor="field-23">Completed job</label>
+                <select id="field-23"
                   value={fbJob}
                   onChange={event => setFbJob(event.target.value)}
                 >
@@ -1509,14 +1635,14 @@ export default function Home() {
                     <strong>Editable request</strong>
                     <p>
                       Thank you for choosing {shop.name}. How was your experience
-                      with the repair? Your feedback helps us improve.
+                      with our service? Your feedback helps us improve.
                     </p>
                     <button
                       className="ghost"
                       onClick={async () => {
                         await navigator.clipboard.writeText(
                           `Thank you for choosing ${shop.name}. ` +
-                          "How was your experience with the repair? " +
+                          "How was your experience with our service? " +
                           "Your feedback helps us improve."
                         );
                         setMessage("Request copied");
@@ -1530,8 +1656,8 @@ export default function Home() {
                 <form onSubmit={saveFeedback}>
                   <div className="form">
                     <div>
-                      <label>Rating (optional)</label>
-                      <select
+                      <label htmlFor="field-24">Rating (optional)</label>
+                      <select id="field-24"
                         value={fbRating}
                         onChange={event => setFbRating(event.target.value)}
                       >
@@ -1544,8 +1670,8 @@ export default function Home() {
                       </select>
                     </div>
                     <div className="full">
-                      <label>Customer comment</label>
-                      <textarea
+                      <label htmlFor="field-25">Customer comment</label>
+                      <textarea id="field-25"
                         value={fbComment}
                         onChange={event => setFbComment(event.target.value)}
                       />
@@ -1563,7 +1689,7 @@ export default function Home() {
               <div className="card">
                 <h2>Responses ({feedback.length})</h2>
                 {feedback.length === 0 ? (
-                  <div className="empty">No feedback recorded yet.</div>
+                  <div className="empty"><Star size={32}/><strong>Every customer has a story.</strong><p>Record your first response to understand their experience.</p></div>
                 ) : feedback.map(item => (
                   <div className="row" key={item.id}>
                     <div>
@@ -1579,6 +1705,9 @@ export default function Home() {
           )}
         </>
       )}
+      <footer className="workspace-footer"><span>BizWise</span> Understand. Learn. Act. Improve.</footer>
+      </div>
+      <PremiumCheckout open={checkoutOpen} onClose={() => setCheckoutOpen(false)} onActivated={activateDemo}/>
     </main>
   );
 }

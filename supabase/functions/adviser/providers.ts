@@ -41,7 +41,7 @@ export async function searchWeb(question: string, town: string): Promise<WebSour
   try {
     response = await fetch('https://google.serper.dev/search', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-KEY': serperKey },
-      body: JSON.stringify({ q: `Car repair shops in ${town.slice(0, 120)}, South Africa. ${question}`, gl: 'za', hl: 'en', num: 10 }),
+      body: JSON.stringify({ q: `Businesses in ${town.slice(0, 120)}, South Africa. ${question}`, gl: 'za', hl: 'en', num: 10 }),
       signal: AbortSignal.timeout(15000), cache: 'no-store',
     });
   } catch { throw new AdviserError('Web search timed out or could not connect. Try again.', 502); }

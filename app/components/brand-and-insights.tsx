@@ -1,0 +1,24 @@
+import { ArrowUpRight, BarChart3, BriefcaseBusiness, Check, CircleHelp, Sparkles } from 'lucide-react';
+export function Brand() {
+  return <div className="brand"><span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M9 24V8h7a4 4 0 0 1 0 8H9m7 0h2a4 4 0 0 1 0 8H9" stroke="currentColor" strokeWidth="3" strokeLinecap="round"/><path d="m22 7 3-3m-1 7h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></span><span>Biz<span className="brand-wise">Wise</span><small>YOUR BUSINESS. YOUR NEXT STEP.</small></span></div>;
+}
+export function WelcomePanel() {
+  return <section className="welcome-panel"><Brand/><div className="welcome-copy"><span className="eyebrow">THE SMALL BUSINESS COACH</span><h1>You know your business.<br/><em>Build on that.</em></h1><p>Turn your everyday records into a skill worth learning, an action worth taking and progress you can measure.</p></div><div className="welcome-case"><div className="case-header"><span>THE BIZWISE APPROACH</span><span>01 — 03</span></div><div className="case-row"><span>01</span><div><strong>Understand the problem</strong><p>Start with your jobs, payments and customer feedback.</p></div></div><div className="case-row"><span>02</span><div><strong>Learn. Then act.</strong><p>Build a relevant skill and put it to work in your business.</p></div></div><div className="case-row"><span>03</span><div><strong>See what worked</strong><p>Record the outcome. Use it to guide your next decision.</p></div></div></div><div className="welcome-footer">FOR SALONS, REPAIR SERVICES, STUDIOS & MORE</div></section>;
+}
+
+type Job = { job_date: string; status: string; amount_charged: number | null; service_id: string; parts_cost: number; other_direct_cost: number };
+type Service = { id: string; name: string };
+const currency = (value: number) => new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 0 }).format(value);
+export function BusinessInsights({ jobs, services, compact = false }: { jobs: Job[]; services: Service[]; compact?: boolean }) {
+  const completed = jobs.filter(job => job.status === 'completed');
+  const current = new Date();
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const date = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() - 5 + i, 1));
+    const key = date.toISOString().slice(0, 7);
+    const amount = completed.filter(job => job.job_date.startsWith(key)).reduce((sum, job) => sum + Number(job.amount_charged || 0), 0);
+    return { key, label: date.toLocaleDateString('en-ZA', { month: 'short', timeZone: 'UTC' }), amount };
+  });
+  const max = Math.max(1, ...months.map(month => month.amount));
+  const ranked = services.map(service => ({ name: service.name, count: completed.filter(job => job.service_id === service.id).length })).filter(service => service.count > 0).sort((a,b) => b.count-a.count).slice(0,4);
+  return <div className={compact ? 'insights-grid compact-insights' : 'insights-grid'}><section className="card chart-card"><div className="section-heading"><div><span className="eyebrow">THE BIG PICTURE</span><h2>Work into revenue</h2></div><span className="pill">6 months</span></div><p className="muted compact">Amounts charged for completed jobs. Current month is partial.</p>{months.some(month => month.amount > 0) ? <div className="revenue-chart" role="img" aria-label={months.map(month=>`${month.label} ${month.key.slice(0,4)}: ${currency(month.amount)}`).join('; ')}>{months.map(month=><div className="chart-column" key={month.key}><span className="chart-value">{currency(month.amount)}</span><div className="chart-track"><span style={{height:`${month.amount/max*100}%`}}/></div><span className="chart-label">{month.label}</span></div>)}</div> : <div className="empty"><BarChart3 size={32}/><strong>Your next chapter starts with a job.</strong><p>Completed jobs from the last six months will build this view.</p></div>}<p className="chart-footnote"><CircleHelp size={14}/> Amounts charged are not payments received or net profit.</p></section><section className="card services-card"><div className="section-heading"><div><span className="eyebrow">WHAT YOU DO BEST</span><h2>Your busiest services</h2></div><BriefcaseBusiness size={20}/></div><p className="muted compact">By completed jobs · all recorded time</p>{ranked.length ? ranked.map((service,i)=><div className="service-rank" key={service.name}><span className="rank-number">0{i+1}</span><div><div className="rank-title"><strong>{service.name}</strong><span>{service.count} {service.count===1?'job':'jobs'}</span></div><div className="bar"><span style={{width:`${service.count/ranked[0].count*100}%`}}/></div></div></div>) : <div className="empty"><BriefcaseBusiness size={30}/><strong>Make your work count.</strong><p>Add services and completed jobs to see what keeps you busy.</p></div>}</section></div>;
+}

@@ -9,6 +9,41 @@ type Recognition = {
   onend: (() => void) | null; start(): void; stop(): void; abort(): void;
 };
 type SpeechWindow = Window & { SpeechRecognition?: new () => Recognition; webkitSpeechRecognition?: new () => Recognition };
+// A visual level meter only. Audio is analysed locally and never recorded or sent anywhere.
+function Waveform({ active }: { active: boolean }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (!active || !navigator.mediaDevices?.getUserMedia) return;
+    let frame = 0; let stream: MediaStream | null = null; let context: AudioContext | null = null; let stopped = false;
+    void navigator.mediaDevices.getUserMedia({ audio: true }).then(media => {
+      if (stopped) { media.getTracks().forEach(track => track.stop()); return; }
+      stream = media; context = new AudioContext();
+      const analyser = context.createAnalyser(); analyser.fftSize = 256;
+      context.createMediaStreamSource(media).connect(analyser);
+      const samples = new Uint8Array(analyser.frequencyBinCount);
+      const draw = () => {
+        const element = canvas.current; const pen = element?.getContext('2d');
+        if (element && pen) {
+          analyser.getByteTimeDomainData(samples);
+          pen.clearRect(0, 0, element.width, element.height);
+          const bars = 48; const width = element.width / bars;
+          pen.fillStyle = '#194d3e';
+          for (let i = 0; i < bars; i++) {
+            const level = Math.abs(samples[Math.floor(i * samples.length / bars)] - 128) / 128;
+            const height = Math.max(2, level * element.height * 1.8);
+            pen.fillRect(i * width + 1, (element.height - height) / 2, width - 2, height);
+          }
+        }
+        frame = requestAnimationFrame(draw);
+      };
+      draw();
+    }).catch(() => { /* The transcript still works without the meter. */ });
+    return () => { stopped = true; cancelAnimationFrame(frame); stream?.getTracks().forEach(track => track.stop()); void context?.close(); };
+  }, [active]);
+  if (!active) return null;
+  return <canvas ref={canvas} className="pm-waveform" width={480} height={56} aria-hidden="true"/>;
+}
+
 export function AdviserInputs({ question, setQuestion, image, setImage, busy, listening, setListening, research, setResearch }: {
   question: string; setQuestion: (value: string) => void; image: string | null; setImage: (value: string | null) => void;
   busy: boolean; listening: boolean; setListening: (value: boolean) => void; research: boolean; setResearch: (value: boolean) => void;
@@ -73,12 +108,14 @@ export function AdviserInputs({ question, setQuestion, image, setImage, busy, li
       <button type="button" className="ghost" disabled={busy || reading} onClick={() => fileInput.current?.click()}><ImagePlus size={18}/>{reading ? 'Reading image…' : 'Attach image'}</button>
       <input ref={fileInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { void attach(event.target.files?.[0]); event.target.value = ''; }}/>
     </div>
+    <Waveform active={listening}/>
+    {listening && question && <p className="pm-live-transcript" aria-live="polite">{question}</p>}
     <p className="muted compact" role="status" aria-live="polite">{supported ? status || 'Voice fills the question box; review before submitting.' : 'Voice is unsupported in this browser. You can still type your question.'}</p>
     <p className="muted compact">Voice may send audio to your browser’s speech service and needs an internet connection. Images are sent to Groq when you ask; the original image is not saved. JPEG, PNG or WebP, up to 3 MB.</p>
     {imageError && <p role="alert" className="notice error">{imageError}</p>}
     {image && <div className="attachment"><img src={image} alt="Image attached for adviser review"/><button type="button" className="ghost" disabled={busy} onClick={() => { selection.current++; setImage(null); }}><X size={18}/> Remove image</button></div>}
     <label className="research-toggle"><input type="checkbox" checked={research} disabled={busy} onChange={event => setResearch(event.target.checked)}/> Research the public web</label>
-    <p className="muted compact">Competitor and local-area questions also trigger search automatically. Your question and saved town go to Serper; shop records and attachments do not.</p>
+    <p className="muted compact">Optional. Search sends your saved town and a general business query to Serper. Your private question, business records and attachments are not sent to search.</p>
   </>;
 }
 export function Sources({ sources, searched }: { sources?: WebSource[]; searched?: boolean }) {

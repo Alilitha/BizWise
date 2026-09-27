@@ -1,0 +1,58 @@
+/* Workflow layouts shared by the overview and job records. */
+.overview-toolbar { display:flex; justify-content:space-between; align-items:center; gap:16px; margin:28px 0 16px; }
+.overview-toolbar label { font-size:17px; font-weight:650; letter-spacing:-.4px; }
+.overview-toolbar select { min-height:40px; padding:9px 12px; background:white; font-size:12px; }
+.next-steps { margin-top:22px; }
+.journey-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-top:24px; }
+.journey-step { display:flex; align-items:flex-start; gap:12px; text-align:left; padding:18px 14px; border:1px solid var(--line); border-radius:12px; background:#fafbf8; color:var(--forest); min-width:0; }
+.journey-step:hover { background:#eef4ec; border-color:#9ab39d; box-shadow:0 4px 14px #173c2d08; }
+.journey-icon { width:35px; height:35px; display:grid; place-items:center; border-radius:10px; background:#eaf0e5; flex-shrink:0; }
+.journey-copy { display:flex; flex-direction:column; gap:7px; flex:1; min-width:0; }
+.journey-copy small { font-size:9px; letter-spacing:1px; color:#607762; }
+.journey-copy strong { font-size:13px; line-height:1.4; }
+.journey-copy>span { font-size:11px; line-height:1.7; color:#596e63; }
+.journey-step>svg { width:15px; margin-top:4px; }
+.jobs-toolbar { display:flex; align-items:center; gap:12px; padding-bottom:20px; border-bottom:1px solid var(--line); }
+.jobs-toolbar input { flex:1; min-width:0; }
+.jobs-toolbar select { width:160px; }
+.results-count { font-size:12px; white-space:nowrap; color:#596e63; }
+/* Scoped specificity keeps refinements consistent with the existing responsive styles. */
+body .card { box-shadow:0 2px 3px #173c2d03,0 8px 24px #173c2d03; }
+body .hero { background:radial-gradient(ellipse at 90% 10%,#386954 0,transparent 58%),#194d3e; }
+body .hero p { color:#d0dfd3; font-size:13px; }
+body .welcome-panel { background:radial-gradient(ellipse at 0 100%,#3c6c51 0,transparent 62%),#194d3e; }
+body .welcome-copy p { font-size:14px; color:#cfddd0; }
+body .welcome-footer { font-size:11px; color:#c4d7c8; }
+body .auth-trust, body .auth-copyright { color:#697962; }
+body .sidebar-note p, body .sidebar-footer, body .workspace-footer { color:#61725e; }
+body .empty p, body .chart-footnote, body .chart-label { color:#607358; }
+body .stat small { color:#596e63; font-size:12px; }
+body .nav button { font-size:13px; }
+body .auth input, body .auth .form>.primary { min-height:52px; }
+@media(min-width:901px) {
+  body .app-header { position:sticky; top:0; z-index:10; }
+  body .sidebar { top:90px; height:calc(100vh - 90px); max-height:none; }
+}
+@media(max-width:1150px) {
+  .journey-grid { gap:10px; }
+  .journey-icon { display:none; }
+  body .nav button { font-size:12px; }
+}
+@media(max-width:900px) {
+  .journey-grid { grid-template-columns:1fr; }
+  .journey-icon { display:grid; }
+  .journey-copy>span { font-size:12px; }
+}
+@media(max-width:640px) {
+  .overview-toolbar { align-items:flex-start; }
+  .overview-toolbar label { font-size:15px; max-width:150px; }
+  .overview-toolbar select { max-width:140px; }
+  .jobs-toolbar { flex-wrap:wrap; }
+  .jobs-toolbar input { flex-basis:100%; }
+  .jobs-toolbar select { flex:1; }
+  .next-steps .section-heading { align-items:flex-start; }
+  .next-steps .pill { white-space:nowrap; font-size:9px; }
+  .journey-step { padding:16px; }
+  body .auth-side { background:radial-gradient(ellipse at top right,#e7edde,transparent 60%); }
+  body .nav button { min-height:44px; }
+}
